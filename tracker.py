@@ -10,9 +10,6 @@ def main():
 class Wallet:
     def __init__(self, address):
         self.address = address
-    
-    def getWalletValue(self):
-        self.getWalletValue()
 
 class LunaWallet(Wallet):
     pricingDataSource = "https://fcd.terra.dev/v1/market/swaprate/uusd"
@@ -89,6 +86,7 @@ class LunaWallet(Wallet):
 class SolWallet(Wallet):
     coins = set("SOL")
     divFactor = 1000000000
+    pricingDataSource = "https://api.coingecko.com/api/v3/coins/solana"
 
     def __init__(self, address):
         super().__init__(address)
@@ -96,17 +94,17 @@ class SolWallet(Wallet):
         self.stakingDataSource = "https://prod-api.solana.surf/v1/account/" + self.address + "/stakes?limit=10&offset=0"
     
     def getLiquidBalances(self):
-        return {'SOL': requests.get("https://prod-api.solana.surf/v1/account/" + self.address).json()['value']['base']['balance'] / self.divFactor}
+        return {'SOL': requests.get(self.balanceDataSource).json()['value']['base']['balance'] / self.divFactor}
 
     def getStakedBalances(self):
-        response = requests.get("https://prod-api.solana.surf/v1/account/" + self.address + "/stakes?limit=10&offset=0").json()
+        response = requests.get(self.stakingDataSource).json()
         total = 0
         for dict in response['data']:
             total += dict['lamports']
         return {'SOL': total / self.divFactor}
 
     def getPrice(self):
-        return requests.get("https://api.coingecko.com/api/v3/coins/solana").json()["market_data"]["current_price"]["usd"]
+        return requests.get(self.pricingDataSource).json()["market_data"]["current_price"]["usd"]
     
     def getWalletValue(self):
         price = self.getPrice()
