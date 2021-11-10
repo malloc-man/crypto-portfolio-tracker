@@ -33,11 +33,13 @@ class LunaWallet(Wallet):
             if 'denom' in item.keys():
                 coinSet.add(item['denom'])
         return coinSet
-    
-    def getCoinBalance(self, coin):
+
+    def getCoinBalance(self, coin, liq=None, stk=None):
         bal = 0
-        liq = self.getLiquidBalances()
-        stk = self.getStakedBalances()
+        if liq == None:
+            liq = self.getLiquidBalances()
+        if stk == None:
+            stk = self.getStakedBalances()
         for item in liq:
             if item['denom'] == coin:
                 bal += float(item['available'])
@@ -47,16 +49,12 @@ class LunaWallet(Wallet):
                 bal += float(item['amount'])
         return bal / self.divFactor
 
-    def getCoinBalanceCached(self, coin, liq_cache, stk_cache):
-        bal = 0
-        for item in liq_cache:
-            if item['denom'] == coin:
-                bal += float(item['available'])
-                break
-        if coin == 'uluna':
-            for item in stk_cache:
-                bal += float(item['amount'])
-        return bal / self.divFactor
+    def getUsdBalance(self, liq=None):
+        if liq == None:
+            liq = self.getLiquidBalances()
+        for item in liq:
+            if item['denom'] == 'uusd':
+                return float(item['available']) / self.divFactor
 
     def getPrices(self):
         prices = {}
@@ -64,12 +62,11 @@ class LunaWallet(Wallet):
         for item in datastream:
             prices[item['denom']] = 1 / float(item['swaprate'])
         return prices
-
-    def getCoinPrice(self, coin):
-        return self.getPrices()[coin]
     
-    def getCoinPriceCached(self, coin, cache):
-        return cache[coin]
+    def getCoinPrice(self, coin, prices=None):
+        if prices == None:
+            prices = self.getPrices()
+        return prices[coin]
         
     def getWalletValue(self):
         total = 0
@@ -78,9 +75,10 @@ class LunaWallet(Wallet):
         stk = self.getStakedBalances()
         for coin in self.coins:
             if coin != 'uusd' and coin != 'ibc/0471F1C4E7AFD3F07702BEF6DC365268D64570F7C1FDC98EA6098DD6DE59817B':
-                price = self.getCoinPriceCached(coin, prices)
-                quantity = self.getCoinBalanceCached(coin, liq, stk)
+                price = self.getCoinPrice(coin, prices)
+                quantity = self.getCoinBalance(coin, liq, stk)
                 total += price * quantity
+        total += self.getUsdBalance(liq)
         return total
     
 class SolWallet(Wallet):
