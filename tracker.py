@@ -22,17 +22,29 @@ class Wallet:
         self.address = address
 
 # LUNA wallet class. Inherits from the Wallet class.
-# Pricing data and wallet balance data come from fcd.terra.dev.
+# Pricing data and wallet balance data come from fcd.terra.dev
+# and extraterrestrial.money.
 class LunaWallet(Wallet):
     pricingDataSource = "https://fcd.terra.dev/v1/market/swaprate/uusd"
+    tokenPricingDataSource = "https://api.extraterrestrial.money/v1/api/prices"
+    cw20DataSource = "https://fcd.terra.dev/wasm/contracts/"
     divFactor = 1000000
+    tokens = {
+        'VKR': 'terra1dy9kmlm4anr92e42mrkjwzyvfqwz66un00rwr5',
+        'ANC': 'terra14z56l0fp2lsf86zy3hty2z47ezkhnthtr9yq76',
+        'MIR': 'terra15gwkyepfc6xgca5t5zefzwy42uts8l2m4g40k6',
+        'LOOP': 'terra1nef5jf6c7js9x6gkntlehgywvjlpytm7pcgkn4',
+        'MINE': 'terra1kcthelkax4j9x8d3ny6sdag0qmxxynl3qtcrpy'
+    }
 
-    # Constructor saves a string URL from which we can pull wallet balance data.
+    # Constructor saves a string URL from which we can pull wallet balance data,
+    # and a string to be appended to the token data source URL to get token balance data.
     # Also creates a set naming all the coins held by the wallet.
     # LUNA wallets can hold LUNA as well as other coins (Terra stablecoins and other tokens).
     def __init__(self, address):
         super().__init__(address)
         self.balanceDataSource = "https://fcd.terra.dev/v1/bank/" + self.address
+        self.cw20DataQuery = "/store?query_msg={\"balance\":{\"address\":\"" + self.address + "\"}}"
         self.coins = self.getCoinSet()
     
     # Returns a list of dictionaries. Each dictionary represents one of the coins held by the wallet.
@@ -81,7 +93,7 @@ class LunaWallet(Wallet):
     # Returns a dictionary whose keys are the names of coins and whose values are the prices of
     # those coins in USD (or, more precisely, the UST stablecoin). The number is inverted here
     # because the data are given as coin per $ instead of $ per coin, which is what we need.
-    def getPrices(self):
+    def getCoinPrices(self):
         prices = {}
         datastream = requests.get(self.pricingDataSource).json()
         for item in datastream:
@@ -94,20 +106,39 @@ class LunaWallet(Wallet):
         if coin == 'uusd':
             return 1.0
         if prices == None:
-            prices = self.getPrices()
+            prices = self.getCoinPrices()
         return prices[coin]
+    
+    # Takes in the address of a token (e.g. ANC token's address) and returns the balance
+    # held by the wallet of that token.
+    def getTokenBalance(self, tokenAddress):
+        return float(requests.get(self.cw20DataSource + tokenAddress + self.cw20DataQuery).json()["result"]["balance"]) / self.divFactor
+    
+    # Returns a dictionary that gives the prices of various tokens from extraterrestrial.money.
+    def getTokenPrices(self):
+        return requests.get(self.tokenPricingDataSource).json()["prices"]
 
-    # Returns the total value of all coins held by the wallet.     
+    # Takes in the name of a token and returns its price.
+    def getTokenPrice(self, token, prices=None):
+        if prices == None:
+            prices = self.getTokenPrices()
+        return prices[token]['price']
+
+    # Returns the total value of everything held by the wallet.     
     def getWalletValue(self):
         total = 0
-        prices = self.getPrices()
+        coinPrices = self.getCoinPrices()
+        tokenPrices = self.getTokenPrices()
         liq = self.getLiquidBalances()
         stk = self.getStakedBalances()
         for coin in self.coins:
             if coin != 'ibc/0471F1C4E7AFD3F07702BEF6DC365268D64570F7C1FDC98EA6098DD6DE59817B':
-                price = self.getCoinPrice(coin, prices)
+                price = self.getCoinPrice(coin, coinPrices)
                 quantity = self.getCoinBalance(coin, liq, stk)
                 total += price * quantity
+        for token in self.tokens.keys():
+            price = self.getTokenPrice(token, tokenPrices)
+            quantity = self.getTokenBalance(self.tokens[token])
         return total
 
 # SOL wallet class. Inherits from the Wallet class.
