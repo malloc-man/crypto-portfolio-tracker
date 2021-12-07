@@ -1,3 +1,5 @@
+import ast
+import os
 from json.decoder import JSONDecodeError
 import requests, time, sys
 
@@ -62,6 +64,7 @@ class LunaWallet(Wallet):
     # Returns a set naming all the coins held by the wallet.
     def getCoinSet(self):
         coinSet = set()
+        coinSet.add('uluna')
         liq = self.getLiquidBalances()
         for item in liq:
             if 'denom' in item.keys():
@@ -132,7 +135,7 @@ class LunaWallet(Wallet):
         liq = self.getLiquidBalances()
         stk = self.getStakedBalances()
         for coin in self.coins:
-            if coin != 'ibc/0471F1C4E7AFD3F07702BEF6DC365268D64570F7C1FDC98EA6098DD6DE59817B':
+            if coin[0:4] != 'ibc/':
                 price = self.getCoinPrice(coin, coinPrices)
                 quantity = self.getCoinBalance(coin, liq, stk)
                 total += price * quantity
@@ -179,6 +182,25 @@ class SolWallet(Wallet):
 # Gets coin names and wallet addresses from user. Returns a list of wallet objects.
 def getWallets():
     lst = []
+    if os.path.exists('config.txt'):
+        useFile = False
+        while True:
+            config = input("Use config file? y/n: ")
+            if config == "y" or config == "Y":
+                useFile = True
+                break
+            if config == "n" or config == "N":
+                break
+        if useFile:
+            with open("config.txt", "r") as f:
+                contents = f.readlines()
+                for line in contents:
+                    i = ast.literal_eval(line)
+                    if i[0] == 'LUNA':
+                        lst.append(LunaWallet(i[1]))
+                    if i[0] == 'SOL':
+                        lst.append(SolWallet(i[1]))
+            return lst
     while True:
         coin = input("Please input the coin this wallet contains (LUNA or SOL): ")
         s = input("Please input your public wallet address: ")
@@ -197,6 +219,14 @@ def getWallets():
                 done = True
                 break
         if done:
+            write = input("Write to file? y/n: ")
+            if write == "y" or write == "Y":
+                with open("config.txt", "w") as f:
+                    for wallet in lst:
+                        if isinstance(wallet, LunaWallet):
+                            f.write("[\'LUNA\', " + "\'" + wallet.address + "\'] \n")
+                        if isinstance(wallet, SolWallet):
+                            f.write("[\'SOL\', " + "\'" + wallet.address + "\'] \n")
             break
     return lst
 
