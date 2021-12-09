@@ -9,13 +9,29 @@ import requests, time, sys
 # based on current pricing data.
 def main():
     wallets = getWallets()
+    erase = "\x1b[1A\x1b[2K"
+    try:
+        writeValues(wallets)
+    except JSONDecodeError:
+        pass
+
     while True:
         try:
-            sys.stdout.write("\r" + time.strftime("%I:%M:%S %p", time.localtime()) + " " + formatUsd(sumAllWallets(wallets)))
-            sys.stdout.flush()
+            for _ in range(len(wallets)+2):
+                sys.stdout.write(erase)
+            writeValues(wallets)
         except JSONDecodeError:
             continue
         time.sleep(30)
+
+def writeValues(wallets):
+    vals = {wallet.address: wallet.getWalletValue() for wallet in wallets}
+    sys.stdout.write("-" * 27 + time.strftime('%I:%M:%S %p', time.localtime()) + "-" * 27 + '\n')
+    sys.stdout.write(
+        f"{'Total: ':<50}{formatUsd(sum(vals[adr] for adr in vals)):>15}" + '\n')
+    for adr in vals:
+        sys.stdout.write(
+            f"{adr + ': ':<50}{formatUsd(vals[adr]):>15}" + '\n')
 
 # Wallet class. Wallet objects have the address attribute storing a string of their address,
 # as well as other attributes and methods depending on the blockchain they are part of.
@@ -24,70 +40,50 @@ class Wallet:
         self.address = address
 
 # LUNA wallet class. Inherits from the Wallet class.
-# Pricing data and wallet balance data come from fcd.terra.dev
-# and extraterrestrial.money.
 class LunaWallet(Wallet):
     pricingDataSource = "https://fcd.terra.dev/v1/market/swaprate/uusd"
     tokenPricingDataSource = "https://api.extraterrestrial.money/v1/api/prices"
     cw20DataSource = "https://fcd.terra.dev/wasm/contracts/"
     divFactor = 1000000
-    tokens = {
-        'VKR': 'terra1dy9kmlm4anr92e42mrkjwzyvfqwz66un00rwr5',
-        'ANC': 'terra14z56l0fp2lsf86zy3hty2z47ezkhnthtr9yq76',
-        'MIR': 'terra15gwkyepfc6xgca5t5zefzwy42uts8l2m4g40k6',
-        'LOOP': 'terra1nef5jf6c7js9x6gkntlehgywvjlpytm7pcgkn4',
-        'MINE': 'terra1kcthelkax4j9x8d3ny6sdag0qmxxynl3qtcrpy'
-    }
+    allTokens = requests.get("https://assets.terra.money/cw20/tokens.json").json()['mainnet']
 
     # Constructor saves a string URL from which we can pull wallet balance data,
-    # and a string to be appended to the token data source URL to get token balance data.
-    # Also creates a set naming all the coins held by the wallet.
-    # LUNA wallets can hold LUNA as well as other coins (Terra stablecoins and other tokens).
+    # a string to be appended to the token data source URL to get token balance data,
+    # and a dictionary with the symbols of Terra cw20 tokens and their addresses.
     def __init__(self, address):
         super().__init__(address)
         self.balanceDataSource = "https://fcd.terra.dev/v1/bank/" + self.address
         self.cw20DataQuery = "/store?query_msg={\"balance\":{\"address\":\"" + self.address + "\"}}"
-        self.coins = self.getCoinSet()
-    
-    # Returns a list of dictionaries. Each dictionary represents one of the coins held by the wallet.
-    # For example, the LUNA dictionary will have 'denom' 'LUNA' and 'available' equal to the balance of LUNA
-    # held by the wallet times a constant (divFactor).
+        self.allTokens = {self.allTokens[tkn]['symbol'].lower(): self.allTokens[tkn]['token'] for tkn in self.allTokens}
+
+    # Returns a dictionary of dictionaries. Each dictionary represents one of the coins held by the wallet.
+    # For example, the LUNA dictionary will have key 'uluna'. Its value will be a dictionary with keys 'available',
+    # 'unbonding', and so on, representing the number of coins in each category held by the wallet (times a
+    # constant divFactor).
     def getLiquidBalances(self):
-        return requests.get(self.balanceDataSource).json()["balance"]
+        data = requests.get(self.balanceDataSource).json()["balance"]
+        return {item['denom']: item for item in data if 'denom' in item}
     
     # Returns a list of dictionaries. Each dictionary represents a delegation of LUNA to a validator.
     # If you have delegated LUNA to several validators, you will have multiple dictionaries, one for each,
     # so to get the sum of your staked LUNA, you must add up the 'amount' fields from each dictionary.
     def getStakedBalances(self):
         return requests.get(self.balanceDataSource).json()["delegations"]
-    
-    # Returns a set naming all the coins held by the wallet.
-    def getCoinSet(self):
-        coinSet = set()
-        coinSet.add('uluna')
-        liq = self.getLiquidBalances()
-        for item in liq:
-            if 'denom' in item.keys():
-                coinSet.add(item['denom'])
-        return coinSet
 
-    # Returns the balance of a particular coin held by the wallet. liq and stk are lists of
-    # dictionaries in the format output by the functions getLiquidBalances() and getStakedBalances().
-    # They're parameters here because, when we get the total wallet value, we have to call
+    # Returns the balance of a particular coin held by the wallet. liq and stk are
+    # parameters here because, when we get the total wallet value, we have to call
     # this function for each coin held by the wallet. If we called getLiquidBalances() and
     # getStakedBalances() each time, that would be horribly inefficient. Instead, when we are
     # iterating over all the coins in the coins set, we get the data once, and then pass it in
-    # as parameters.
+    # for each call.
     def getCoinBalance(self, coin, liq=None, stk=None):
         bal = 0
         if liq == None:
             liq = self.getLiquidBalances()
         if stk == None:
             stk = self.getStakedBalances()
-        for item in liq:
-            if item['denom'] == coin:
-                bal += float(item['available'])
-                break
+        if coin in liq:
+            bal += float(liq[coin]['available'])
         if coin == 'uluna':
             for item in stk:
                 bal += float(item['amount'])
@@ -97,10 +93,8 @@ class LunaWallet(Wallet):
     # those coins in USD (or, more precisely, the UST stablecoin). The number is inverted here
     # because the data are given as coin per $ instead of $ per coin, which is what we need.
     def getCoinPrices(self):
-        prices = {}
         datastream = requests.get(self.pricingDataSource).json()
-        for item in datastream:
-            prices[item['denom']] = 1 / float(item['swaprate'])
+        prices = {item['denom']: 1 / float(item['swaprate']) for item in datastream}
         return prices
     
     # Returns the price of a particular coin in USD (again really UST). Allows price data
@@ -117,15 +111,16 @@ class LunaWallet(Wallet):
     def getTokenBalance(self, tokenAddress):
         return float(requests.get(self.cw20DataSource + tokenAddress + self.cw20DataQuery).json()["result"]["balance"]) / self.divFactor
     
-    # Returns a dictionary that gives the prices of various tokens from extraterrestrial.money.
+    # Returns a dictionary that gives the prices of various cw20 tokens.
     def getTokenPrices(self):
-        return requests.get(self.tokenPricingDataSource).json()["prices"]
+        prices = requests.get(self.tokenPricingDataSource).json()["prices"]
+        return {item.lower(): prices[item]['price'] for item in prices}
 
     # Takes in the name of a token and returns its price.
     def getTokenPrice(self, token, prices=None):
         if prices == None:
             prices = self.getTokenPrices()
-        return prices[token]['price']
+        return prices[token]
 
     # Returns the total value of everything held by the wallet.     
     def getWalletValue(self):
@@ -133,15 +128,11 @@ class LunaWallet(Wallet):
         coinPrices = self.getCoinPrices()
         tokenPrices = self.getTokenPrices()
         liq = self.getLiquidBalances()
+        if 'uluna' not in liq:
+            liq['uluna'] = 0
         stk = self.getStakedBalances()
-        for coin in self.coins:
-            if coin[0:4] != 'ibc/':
-                price = self.getCoinPrice(coin, coinPrices)
-                quantity = self.getCoinBalance(coin, liq, stk)
-                total += price * quantity
-        for token in self.tokens.keys():
-            price = self.getTokenPrice(token, tokenPrices)
-            quantity = self.getTokenBalance(self.tokens[token])
+        total += sum([self.getCoinPrice(coin, coinPrices) * self.getCoinBalance(coin, liq, stk) for coin in liq if coin[0:4] != 'ibc/'])
+        total += sum([self.getTokenPrice(token, tokenPrices) * self.getTokenBalance(self.allTokens[token]) for token in tokenPrices if token in self.allTokens])
         return total
 
 # SOL wallet class. Inherits from the Wallet class.
