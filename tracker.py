@@ -17,7 +17,7 @@ def main():
 
     while True:
         try:
-            for _ in range(len(wallets)+2):
+            for _ in range(len(wallets)+3):
                 sys.stdout.write(erase)
             writeValues(wallets)
         except JSONDecodeError:
@@ -29,6 +29,7 @@ def writeValues(wallets):
     sys.stdout.write("-" * 27 + time.strftime('%I:%M:%S %p', time.localtime()) + "-" * 27 + '\n')
     sys.stdout.write(
         f"{'Total: ':<50}{formatUsd(sum(vals[adr] for adr in vals)):>15}" + '\n')
+    sys.stdout.write("-" * 65 + '\n')
     for adr in vals:
         sys.stdout.write(
             f"{adr + ': ':<50}{formatUsd(vals[adr]):>15}" + '\n')
