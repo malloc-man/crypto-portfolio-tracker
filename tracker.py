@@ -130,7 +130,7 @@ class LunaWallet(Wallet):
         tokenPrices = self.getTokenPrices()
         liq = self.getLiquidBalances()
         if 'uluna' not in liq:
-            liq['uluna'] = 0
+            liq['uluna'] = {'available': 0}
         stk = self.getStakedBalances()
         total += sum([self.getCoinPrice(coin, coinPrices) * self.getCoinBalance(coin, liq, stk) for coin in liq if coin[0:4] != 'ibc/'])
         total += sum([self.getTokenPrice(token, tokenPrices) * self.getTokenBalance(self.allTokens[token]) for token in tokenPrices if token in self.allTokens])
